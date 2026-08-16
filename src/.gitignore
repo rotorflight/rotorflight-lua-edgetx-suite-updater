@@ -1,0 +1,11 @@
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+version_info.txt
+icon.icns
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

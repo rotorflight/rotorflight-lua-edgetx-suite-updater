@@ -23,6 +23,11 @@ APP_VERSION = "1.0.0"
 DEFAULT_REPO = "rotorflight/rotorflight-lua-edgetx-suite"
 GITHUB_API_RELEASES = f"https://api.github.com/repos/{DEFAULT_REPO}/releases"
 
+# Standard EdgeTX SD card folders. A SCRIPTS folder alone is not proof of a
+# radio (e.g. C:\SCRIPTS), so it must sit alongside several of these.
+RADIO_ROOT_HINTS = ("IMAGES", "LOGS", "MODELS", "RADIO", "SCREENSHOTS", "SOUNDS", "TEMPLATES", "THEMES", "WIDGETS")
+AUTO_DETECT_MIN_HINTS = 3
+
 
 class RadioDetector:
     """Helper to detect connected EdgeTX SD cards / radio drives across OS platforms."""
@@ -33,6 +38,7 @@ class RadioDetector:
             return False, 0
 
         score = 0
+        has_marker = False
         scripts_dir = os.path.join(path, "SCRIPTS")
         sounds_dir = os.path.join(path, "SOUNDS")
         widgets_dir = os.path.join(path, "WIDGETS")
@@ -40,12 +46,16 @@ class RadioDetector:
 
         if os.path.isfile(os.path.join(path, "radio.cpuid")):
             score += 10
+            has_marker = True
         if os.path.isfile(os.path.join(path, "sdcard.cpuid")):
             score += 10
+            has_marker = True
         if os.path.isfile(os.path.join(path, "flash.cpuid")):
             score += 8
+            has_marker = True
         if os.path.isfile(os.path.join(radio_dir, "radio.yml")) or os.path.isfile(os.path.join(radio_dir, "radio.bin")):
             score += 8
+            has_marker = True
         if os.path.isdir(os.path.join(scripts_dir, "TOOLS")):
             score += 5
         if os.path.isdir(scripts_dir):
@@ -55,7 +65,8 @@ class RadioDetector:
         if os.path.isdir(sounds_dir):
             score += 2
 
-        is_radio = score >= 5 or (os.path.isdir(scripts_dir) and (os.path.isdir(widgets_dir) or os.path.isdir(sounds_dir)))
+        hint_count = sum(1 for hint in RADIO_ROOT_HINTS if os.path.isdir(os.path.join(path, hint)))
+        is_radio = has_marker or (os.path.isdir(scripts_dir) and hint_count >= AUTO_DETECT_MIN_HINTS)
         return is_radio, score
 
     @classmethod
@@ -71,7 +82,7 @@ class RadioDetector:
                     try:
                         is_radio, score = cls.is_likely_radio_root(drive)
                         label = f"{drive} (Radio SD Card)" if is_radio else f"{drive}"
-                        candidates.append((drive, label, score))
+                        candidates.append((drive, label, score, is_radio))
                     except Exception:
                         pass
         elif system == "Darwin":  # macOS
@@ -82,7 +93,7 @@ class RadioDetector:
                     if os.path.isdir(path):
                         is_radio, score = cls.is_likely_radio_root(path)
                         label = f"{item} (Radio)" if is_radio else item
-                        candidates.append((path, label, score))
+                        candidates.append((path, label, score, is_radio))
         else:  # Linux
             search_paths = ["/media", "/run/media", "/mnt"]
             for base in search_paths:
@@ -92,10 +103,10 @@ class RadioDetector:
                             path = os.path.join(root, d)
                             is_radio, score = cls.is_likely_radio_root(path)
                             if is_radio:
-                                candidates.append((path, f"{d} (Radio)", score))
+                                candidates.append((path, f"{d} (Radio)", score, is_radio))
 
-        # Sort highest score first
-        candidates.sort(key=lambda x: x[2], reverse=True)
+        # Detected radios first, then highest score
+        candidates.sort(key=lambda x: (x[3], x[2]), reverse=True)
         return candidates
 
 
@@ -389,10 +400,10 @@ class RFSuiteUpdaterApp:
         if os.path.isdir(sim_dir):
             options.append(sim_dir)
 
-        for path, label, score in candidates:
+        for path, label, score, is_radio in candidates:
             if path not in options:
                 options.append(path)
-            if score >= 5 and best_path is None:
+            if is_radio and best_path is None:
                 best_path = path
 
         self.drive_combo["values"] = options
@@ -400,10 +411,13 @@ class RFSuiteUpdaterApp:
             self.selected_drive.set(best_path)
             self.log(f"Auto-detected Radio SD Card at: {best_path}")
             self._check_installed_version(best_path)
-        elif options:
-            self.selected_drive.set(options[0])
-            self._check_installed_version(options[0])
+        elif os.path.isdir(sim_dir):
+            self.selected_drive.set(sim_dir)
+            self._check_installed_version(sim_dir)
         else:
+            # Never preselect an unrecognised drive: the user must pick one.
+            if options:
+                self.log("No radio SD card detected. Select the target drive manually.")
             self.selected_drive.set("")
             self.installed_ver_lbl.configure(text="Installed: No drive selected")
 

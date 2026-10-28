@@ -19,7 +19,7 @@ from tkinter import ttk, messagebox, filedialog
 from typing import List, Dict, Optional, Tuple
 
 APP_TITLE = "Rotorflight EdgeTX Suite Updater"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 DEFAULT_REPO = "rotorflight/rotorflight-lua-edgetx-suite"
 GITHUB_API_RELEASES = f"https://api.github.com/repos/{DEFAULT_REPO}/releases"
 

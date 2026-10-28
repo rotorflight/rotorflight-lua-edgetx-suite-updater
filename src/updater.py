@@ -29,6 +29,32 @@ RADIO_ROOT_HINTS = ("IMAGES", "LOGS", "MODELS", "RADIO", "SCREENSHOTS", "SOUNDS"
 AUTO_DETECT_MIN_HINTS = 3
 
 
+def _strip_lua_comment(line: str) -> str:
+    """Remove a trailing Lua '--' comment from one line.
+
+    A '--' inside a quoted string is text, not a comment: the German help
+    line `"... steht dort --."` must keep its closing quote. The line ending
+    is kept so the caller's line handling is unchanged.
+    """
+    quote = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in ('"', "'"):
+            quote = ch
+        elif line.startswith("--", i):
+            ending = "\n" if line.endswith("\n") else ""
+            return line[:i] + ending
+        i += 1
+    return line
+
+
 class RadioDetector:
     """Helper to detect connected EdgeTX SD cards / radio drives across OS platforms."""
 
@@ -1344,17 +1370,22 @@ class RFSuiteUpdaterApp:
                         pass
 
     def _load_lua_i18n_table(self, path_str: str) -> dict:
-        """Parses a Lua return { ... } dictionary into Python dict."""
+        """Parses a Lua return { ... } dictionary into Python dict.
+
+        Raises RuntimeError when the file cannot be parsed or holds no table,
+        so a broken language file stops the build instead of silently leaving
+        every @i18n(...)@ tag unresolved.
+        """
         if not path_str or not os.path.isfile(path_str):
             return {}
         try:
             import codecs
             with open(path_str, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
-                
+
             json_str = ""
             for line in lines:
-                line = re.sub(r'--.*$', '', line)
+                line = _strip_lua_comment(line)
                 stripped = line.strip()
                 if not stripped:
                     continue
@@ -1402,11 +1433,13 @@ class RFSuiteUpdaterApp:
 
             json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
             json_str = re.sub(r',\s*$', '', json_str)
-            
-            return json.loads(json_str)
+
+            table = json.loads(json_str)
+            if not isinstance(table, dict) or not table:
+                raise ValueError("no translation table found")
+            return table
         except Exception as e:
-            self.log(f"Notice: Lua i18n parsing error on {path_str}: {e}")
-            return {}
+            raise RuntimeError(f"Cannot read language file {path_str}: {e}") from e
 
     def _generate_theme_index(self, target_core_dir: str, target_user_dir: str):
         entries = []

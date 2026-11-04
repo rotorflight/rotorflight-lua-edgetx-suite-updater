@@ -29,6 +29,62 @@ RADIO_ROOT_HINTS = ("IMAGES", "LOGS", "MODELS", "RADIO", "SCREENSHOTS", "SOUNDS"
 AUTO_DETECT_MIN_HINTS = 3
 
 
+# Where the suite's code and the pilot's data sit on the card, by suite version. The newer layout comes
+# first. The data folders are named so that a source tree can be staged; an install never removes one.
+CODE_FOLDERS = (("SCRIPTS", "RFSUITE", "core"), ("SCRIPTS", "TOOLS", "rfsuite-core"))
+DATA_FOLDERS = (("SCRIPTS", "RFSUITE", "user"), ("SCRIPTS", "TOOLS", "rfsuite.user"))
+
+# The radio writes bytecode beside each entry file it runs, and loads it unless the source is newer.
+# An entry's old bytecode can point at a code folder an install has just removed.
+ENTRY_BYTECODE = (
+    ("SCRIPTS", "TOOLS", "rfsuite.luac"),
+    ("SCRIPTS", "FUNCTIONS", "rfsbg.luac"),
+    ("WIDGETS", "rfsuite", "main.luac"),
+    ("WIDGETS", "rfsuitesvc", "main.luac"),
+)
+
+
+def source_tree_layout(src_core: str) -> tuple:
+    """(code folder, data folder) a source tree expects on the card, read from its lib/paths.lua.
+
+    A tree with no such file, or one that names neither known code folder, predates the module and
+    uses the older layout.
+    """
+    try:
+        with open(os.path.join(src_core, "lib", "paths.lua"), "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except OSError:
+        return CODE_FOLDERS[1], DATA_FOLDERS[1]
+    match = re.search(r'\bcore\s*=\s*"/([^"]+)"', content)
+    named = tuple(match.group(1).split("/")) if match else None
+    if named == CODE_FOLDERS[0]:
+        return CODE_FOLDERS[0], DATA_FOLDERS[0]
+    return CODE_FOLDERS[1], DATA_FOLDERS[1]
+
+
+def remove_previous_code(target_root: str, log=lambda _message: None) -> None:
+    """Removes the suite's code from a card, in every layout, and leaves the pilot's data alone."""
+    for parts in CODE_FOLDERS + (("SCRIPTS", "TOOLS", "rfsuite"),):
+        folder = os.path.join(target_root, *parts)
+        if os.path.isdir(folder):
+            log(f"Cleaning previous installation in {'/'.join(parts)}...")
+            shutil.rmtree(folder, ignore_errors=True)
+    for parts in ENTRY_BYTECODE:
+        bytecode = os.path.join(target_root, *parts)
+        if os.path.isfile(bytecode):
+            log(f"Removing old bytecode {'/'.join(parts)}...")
+            os.remove(bytecode)
+
+
+def drop_packaged_data(stage_dir: str, log=lambda _message: None) -> None:
+    """Removes the data folders from what is about to be copied, so no package overwrites the pilot's files."""
+    for parts in DATA_FOLDERS:
+        folder = os.path.join(stage_dir, *parts)
+        if os.path.isdir(folder):
+            log(f"Leaving the pilot's data alone: not copying {'/'.join(parts)}...")
+            shutil.rmtree(folder)
+
+
 def _strip_lua_comment(line: str) -> str:
     """Remove a trailing Lua '--' comment from one line.
 
@@ -464,7 +520,8 @@ class RFSuiteUpdaterApp:
             return
 
         candidates = [
-            os.path.join(root_path, "SCRIPTS", "TOOLS", "rfsuite-core", "lib", "version.lua"),
+            os.path.join(root_path, *CODE_FOLDERS[0], "lib", "version.lua"),
+            os.path.join(root_path, *CODE_FOLDERS[1], "lib", "version.lua"),
             os.path.join(root_path, "SCRIPTS", "TOOLS", "rfsuite", "lib", "version.lua"),
             os.path.join(root_path, "src", "rfsuite", "lib", "version.lua")
         ]
@@ -807,17 +864,9 @@ class RFSuiteUpdaterApp:
 
             # Step 5: Clean old core directory to avoid orphan files
             self.set_status("Deploying files to radio SD card...")
-            target_tools = os.path.join(target_root, "SCRIPTS", "TOOLS")
-            target_core = os.path.join(target_tools, "rfsuite-core")
-            legacy_core = os.path.join(target_tools, "rfsuite")
-
-            if os.path.isdir(target_core):
-                self.log("Cleaning previous rfsuite-core installation...")
-                shutil.rmtree(target_core, ignore_errors=True)
-
-            if os.path.isdir(legacy_core):
-                self.log("Cleaning legacy rfsuite directory...")
-                shutil.rmtree(legacy_core, ignore_errors=True)
+            # First, so that a failure here stops the install before anything on the card is touched.
+            drop_packaged_data(stage_out_dir, self.log)
+            remove_previous_code(target_root, self.log)
 
             # Step 6: Copy new files to target
             self.log(f"Copying files to target: {target_root}")
@@ -859,12 +908,14 @@ class RFSuiteUpdaterApp:
         src_user = os.path.join(src_root, "rfsuite.user")
         src_audio = os.path.join(src_core, "audio")
 
+        code_folder, data_folder = source_tree_layout(src_core)
         staging_tools = os.path.join(stage_out, "SCRIPTS", "TOOLS")
-        staging_core = os.path.join(staging_tools, "rfsuite-core")
+        staging_core = os.path.join(stage_out, *code_folder)
         staging_widgets = os.path.join(stage_out, "WIDGETS", "rfsuite")
         staging_sounds = os.path.join(stage_out, "SOUNDS", "rf")
-        staging_user = os.path.join(staging_tools, "rfsuite.user")
+        staging_user = os.path.join(stage_out, *data_folder)
 
+        os.makedirs(staging_tools, exist_ok=True)
         os.makedirs(staging_core, exist_ok=True)
         os.makedirs(staging_widgets, exist_ok=True)
         os.makedirs(staging_sounds, exist_ok=True)
@@ -923,12 +974,13 @@ class RFSuiteUpdaterApp:
         fallback_file = os.path.join(src_core, "i18n", "en.lua")
         
         self.log(f"Precompiling i18n tags for {lang}...")
-        self._precompile_i18n_dir(staging_tools)
+        staging_scripts = os.path.join(stage_out, "SCRIPTS")
+        self._precompile_i18n_dir(staging_scripts)
         self._precompile_i18n_dir(staging_widgets)
 
         if os.path.isfile(lang_file):
             self.log(f"Resolving translations with {lang}.lua...")
-            self._resolve_i18n_dir(staging_tools, lang_file, fallback_file if lang != "en" else None, lang)
+            self._resolve_i18n_dir(staging_scripts, lang_file, fallback_file if lang != "en" else None, lang)
             self._resolve_i18n_dir(staging_widgets, lang_file, fallback_file if lang != "en" else None, lang)
 
     def _precompile_i18n_dir(self, root_dir: str):

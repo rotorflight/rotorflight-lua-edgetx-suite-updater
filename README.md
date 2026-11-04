@@ -7,7 +7,8 @@ A standalone desktop utility for Windows, macOS, and Linux to easily install, up
 - **SD Card / Radio Auto-Detection**: Automatically identifies connected EdgeTX radios and drives.
 - **GitHub Release Integration**: Downloads and installs official releases and pre-releases from GitHub.
 - **Multi-Language Support**: Installs language-specific packs (`en`, `de`, ...).
-- **User Settings Preservation**: Preserves `preferences.ini` and custom user dashboards during updates.
+- **User Settings Kept**: An install replaces the suite's code and never touches the folder that
+  holds the pilot's settings and custom dashboard themes.
 - **Offline / Local Mode**: Supports manual installation from locally downloaded `.zip` files.
 
 ## Download

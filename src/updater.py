@@ -62,13 +62,33 @@ def source_tree_layout(src_core: str) -> tuple:
     return CODE_FOLDERS[1], DATA_FOLDERS[1]
 
 
+def code_folders_by_use(card_root: str) -> tuple:
+    """The code folders with the one the tool entry on the card loads first.
+
+    Both can be on a card: an older archive unpacked over a newer install leaves the newer folder
+    behind, and it is the entry file that says which of the two runs.
+    """
+    try:
+        with open(os.path.join(card_root, "SCRIPTS", "TOOLS", "rfsuite.lua"), "r", encoding="utf-8", errors="ignore") as f:
+            entry = f.read()
+    except OSError:
+        return CODE_FOLDERS
+    if "/".join(CODE_FOLDERS[1]) in entry and "/".join(CODE_FOLDERS[0]) not in entry:
+        return (CODE_FOLDERS[1], CODE_FOLDERS[0])
+    return CODE_FOLDERS
+
+
 def remove_previous_code(target_root: str, log=lambda _message: None) -> None:
-    """Removes the suite's code from a card, in every layout, and leaves the pilot's data alone."""
+    """Removes the suite's code from a card, in every layout, and leaves the pilot's data alone.
+
+    A folder that cannot be removed raises: new files merged into a partly removed one would run
+    beside the previous version's.
+    """
     for parts in CODE_FOLDERS + (("SCRIPTS", "TOOLS", "rfsuite"),):
         folder = os.path.join(target_root, *parts)
         if os.path.isdir(folder):
             log(f"Cleaning previous installation in {'/'.join(parts)}...")
-            shutil.rmtree(folder, ignore_errors=True)
+            shutil.rmtree(folder)
     for parts in ENTRY_BYTECODE:
         bytecode = os.path.join(target_root, *parts)
         if os.path.isfile(bytecode):
@@ -519,9 +539,10 @@ class RFSuiteUpdaterApp:
             self.installed_ver_lbl.configure(text="Installed: Invalid path", foreground="#aaaaaa")
             return
 
+        in_use, other = code_folders_by_use(root_path)
         candidates = [
-            os.path.join(root_path, *CODE_FOLDERS[0], "lib", "version.lua"),
-            os.path.join(root_path, *CODE_FOLDERS[1], "lib", "version.lua"),
+            os.path.join(root_path, *in_use, "lib", "version.lua"),
+            os.path.join(root_path, *other, "lib", "version.lua"),
             os.path.join(root_path, "SCRIPTS", "TOOLS", "rfsuite", "lib", "version.lua"),
             os.path.join(root_path, "src", "rfsuite", "lib", "version.lua")
         ]

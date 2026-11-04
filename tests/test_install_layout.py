@@ -51,6 +51,7 @@ class PackageSourceTreeTests(unittest.TestCase):
         """Runs the real staging on a minimal source tree; returns the staging folder."""
 
         roots = []
+        resolved = []
 
         class Host:
             def log(self, _message):
@@ -62,18 +63,20 @@ class PackageSourceTreeTests(unittest.TestCase):
             def _precompile_i18n_dir(self, root):
                 roots.append(root)
 
-            def _resolve_i18n_dir(self, *_args):
-                pass
+            def _resolve_i18n_dir(self, root, *_args):
+                resolved.append(root)
 
         repo = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, repo, True)
         write(repo, "src/main.lua", "-- entry")
         write(repo, "src/rfsuite/lib/paths.lua", 'return {\n  core = "%s",\n}\n' % core_literal)
         write(repo, "src/rfsuite/init.lua", "return {}")
+        write(repo, "src/rfsuite/i18n/en.lua", "return {}")
         out = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, out, True)
         updater.RFSuiteUpdaterApp._package_source_tree(Host(), repo, out, "en")
         self.i18n_roots = roots
+        self.i18n_resolved_roots = resolved
         return out
 
     def test_new_layout_source_tree_stages_the_new_folders(self):
@@ -83,12 +86,29 @@ class PackageSourceTreeTests(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(out, "SCRIPTS", "TOOLS", "rfsuite-core")))
         core = os.path.join(out, "SCRIPTS", "RFSUITE", "core")
         self.assertTrue(any(core.startswith(root) for root in self.i18n_roots), self.i18n_roots)
+        self.assertTrue(any(core.startswith(root) for root in self.i18n_resolved_roots), self.i18n_resolved_roots)
 
     def test_older_source_tree_stages_the_older_folders(self):
         out = self.stage("/SCRIPTS/TOOLS/rfsuite-core")
         self.assertTrue(os.path.isfile(os.path.join(out, "SCRIPTS", "TOOLS", "rfsuite.lua")))
         self.assertTrue(os.path.isfile(os.path.join(out, "SCRIPTS", "TOOLS", "rfsuite-core", "lib", "paths.lua")))
         self.assertFalse(os.path.exists(os.path.join(out, "SCRIPTS", "RFSUITE")))
+
+
+class CodeFoldersByUseTests(unittest.TestCase):
+    NEW = ("SCRIPTS", "RFSUITE", "core")
+    OLD = ("SCRIPTS", "TOOLS", "rfsuite-core")
+
+    def test_the_entry_decides(self):
+        with tempfile.TemporaryDirectory() as card:
+            write(card, "SCRIPTS/TOOLS/rfsuite.lua", 'loadScript("/SCRIPTS/TOOLS/rfsuite-core/lib/require.lua")')
+            self.assertEqual(updater.code_folders_by_use(card), (self.OLD, self.NEW))
+            write(card, "SCRIPTS/TOOLS/rfsuite.lua", 'loadScript("/SCRIPTS/RFSUITE/core/lib/require.lua")')
+            self.assertEqual(updater.code_folders_by_use(card), (self.NEW, self.OLD))
+
+    def test_no_entry_keeps_the_newer_first(self):
+        with tempfile.TemporaryDirectory() as card:
+            self.assertEqual(updater.code_folders_by_use(card), (self.NEW, self.OLD))
 
 
 class DropPackagedDataTests(unittest.TestCase):
@@ -133,6 +153,21 @@ class RemovePreviousCodeTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(os.path.join(card, *gone.split("/"))), gone)
             for path in kept:
                 self.assertTrue(os.path.isfile(path), path)
+
+    def test_a_folder_that_cannot_be_removed_stops_the_install(self):
+        with tempfile.TemporaryDirectory() as card:
+            write(card, "SCRIPTS/RFSUITE/core/lib/version.lua")
+            real = updater.shutil.rmtree
+
+            def refuse(*_args, **_kwargs):
+                raise OSError("in use")
+
+            updater.shutil.rmtree = refuse
+            try:
+                with self.assertRaises(OSError):
+                    updater.remove_previous_code(card)
+            finally:
+                updater.shutil.rmtree = real
 
     def test_a_card_without_the_suite_is_left_alone(self):
         with tempfile.TemporaryDirectory() as card:

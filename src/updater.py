@@ -230,7 +230,6 @@ class RFSuiteUpdaterApp:
         self.selected_release_tag = tk.StringVar()
         self.selected_language = tk.StringVar(value="de")
         self.include_prereleases = tk.BooleanVar(value=True)
-        self.preserve_settings = tk.BooleanVar(value=True)
         self.local_zip_path = tk.StringVar()
         self.is_local_mode = tk.BooleanVar(value=False)
 
@@ -410,16 +409,6 @@ class RFSuiteUpdaterApp:
     def _build_actions_card(self, parent):
         card = ttk.Frame(parent, style="Card.TFrame", padding=12)
         card.pack(fill="x", pady=4)
-
-        opt_row = ttk.Frame(card, style="Card.TFrame")
-        opt_row.pack(fill="x", pady=(0, 6))
-
-        preserve_chk = ttk.Checkbutton(
-            opt_row,
-            text="Preserve User Settings (preferences.ini & custom themes)",
-            variable=self.preserve_settings
-        )
-        preserve_chk.pack(side="left")
 
         btn_row = ttk.Frame(card, style="Card.TFrame")
         btn_row.pack(fill="x")
@@ -874,15 +863,6 @@ class RFSuiteUpdaterApp:
             else:
                 raise RuntimeError("Invalid package structure: Neither 'src' source tree nor 'SCRIPTS' folder found.")
 
-            # Step 4: Backup user preferences if enabled
-            pref_backup_path = None
-            if self.preserve_settings.get():
-                target_user_pref = os.path.join(target_root, "SCRIPTS", "TOOLS", "rfsuite.user", "preferences.ini")
-                if os.path.isfile(target_user_pref):
-                    self.log("Backing up existing user preferences (preferences.ini)...")
-                    pref_backup_path = os.path.join(temp_dir, "preferences.ini.bak")
-                    shutil.copy2(target_user_pref, pref_backup_path)
-
             # Step 5: Clean old core directory to avoid orphan files
             self.set_status("Deploying files to radio SD card...")
             # First, so that a failure here stops the install before anything on the card is touched.
@@ -899,13 +879,6 @@ class RFSuiteUpdaterApp:
                 else:
                     os.makedirs(os.path.dirname(dst_item), exist_ok=True)
                     shutil.copy2(src_item, dst_item)
-
-            # Step 7: Restore user preferences if backed up
-            if pref_backup_path and os.path.isfile(pref_backup_path):
-                self.log("Restoring preserved user preferences...")
-                dst_user_dir = os.path.join(target_root, "SCRIPTS", "TOOLS", "rfsuite.user")
-                os.makedirs(dst_user_dir, exist_ok=True)
-                shutil.copy2(pref_backup_path, os.path.join(dst_user_dir, "preferences.ini"))
 
             self.log("✅ Installation completed successfully!")
             self.set_status("Installation complete! ✅")

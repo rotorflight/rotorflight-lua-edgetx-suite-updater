@@ -1,3 +1,7 @@
+# 1.0.3
+
+- (in progress)
+
 # 1.0.2
 
 - Support for the suite's new `SCRIPTS/RFSUITE` layout: code goes to `SCRIPTS/RFSUITE/core`, pilot data to `SCRIPTS/RFSUITE/user`. A source-branch install stages the layout the tree's own `lib/paths.lua` names, so older and newer branches keep working. An install removes the code of every layout plus the bytecode the radio wrote beside the entry files (which can point at a removed folder); the data folders are never touched.

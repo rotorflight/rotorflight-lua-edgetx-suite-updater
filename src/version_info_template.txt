@@ -19,7 +19,7 @@ VSVersionInfo(
           StringStruct('FileDescription', 'Rotorflight Lua EdgeTX Suite Updater'),
           StringStruct('FileVersion', '{FILEVER_STR}'),
           StringStruct('InternalName', 'rotorflight-lua-edgetx-suite-updater'),
-          StringStruct('LegalCopyright', 'Copyright (C) 2025 Rotorflight Project'),
+          StringStruct('LegalCopyright', 'Copyright (C) 2026 Rotorflight Project'),
           StringStruct('OriginalFilename', 'rotorflight-lua-edgetx-suite-updater.exe'),
           StringStruct('ProductName', 'Rotorflight Lua EdgeTX Suite Updater'),
           StringStruct('ProductVersion', '{PRODVER_STR}')

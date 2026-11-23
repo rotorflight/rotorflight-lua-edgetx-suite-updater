@@ -92,6 +92,27 @@ def read_suite_version(src_core: str) -> str:
     return "0.1.0"
 
 
+def sound_packs_to_stage(src_core: str, src_audio: str, lang: str) -> list:
+    """The sound packs a source tree's own packager puts into the archive for `lang`.
+
+    A tree whose lib/system_locale.lua has packageLanguage() plays an announcement the chosen
+    language's pack lacks from the package's own pack, so its packager stages that one pack: the
+    locale's own, or English where the tree has none for it. An older tree has no such fallback
+    (a pilot who chose the other language would hear nothing), so it gets both packs as before.
+    """
+    try:
+        with open(os.path.join(src_core, "lib", "system_locale.lua"), "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except OSError:
+        content = ""
+    # A definition at the start of a line, so a commented-out one (`-- function ...`) does not count.
+    defined = re.search(r"^[ \t]*(?:function\s+M\.packageLanguage\s*\(|M\.packageLanguage\s*=\s*function\b)",
+                        content, re.MULTILINE)
+    if not defined:
+        return ["en", "de"]
+    return [lang if os.path.isdir(os.path.join(src_audio, lang)) else "en"]
+
+
 def write_build_identity(stage_dir: str, staging_core: str, version: str) -> str:
     """Writes <code folder>/build.txt the way the suite's packager does (bin/package/build_package.py).
 
@@ -1010,7 +1031,9 @@ class RFSuiteUpdaterApp:
 
         # Copy sounds
         if os.path.isdir(src_audio):
-            for pack_lang in ["en", "de"]:
+            pack_langs = sound_packs_to_stage(src_core, src_audio, lang)
+            self.log(f"Staging sound pack(s): {', '.join(pack_langs)}")
+            for pack_lang in pack_langs:
                 p_src = os.path.join(src_audio, pack_lang, "default")
                 if not os.path.isdir(p_src):
                     p_src = os.path.join(src_audio, pack_lang)

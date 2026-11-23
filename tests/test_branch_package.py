@@ -104,5 +104,47 @@ class BranchPackageTests(unittest.TestCase):
         self.assertNotEqual(first.split("-")[0], other.split("-")[0])
 
 
+PACKAGE_LANGUAGE = """local M = {}
+function M.packageLanguage()
+  return "en"
+end
+return M
+"""
+
+
+class SoundPackTests(unittest.TestCase):
+    """One pack per archive where the tree falls back to the package's pack, both packs otherwise."""
+
+    def stage(self, lang, fallback):
+        repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo, True)
+        source_tree(repo)
+        if fallback:
+            write(repo, "src/rfsuite/lib/system_locale.lua", PACKAGE_LANGUAGE)
+        out = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out, True)
+        Host()._package_source_tree(repo, out, lang)
+        sounds = os.path.join(out, "SOUNDS", "rf")
+        return sorted(d for d in os.listdir(sounds) if os.path.isdir(os.path.join(sounds, d)))
+
+    def test_a_tree_with_the_fallback_stages_the_chosen_language_only(self):
+        self.assertEqual(self.stage("de", fallback=True), ["de"])
+        self.assertEqual(self.stage("en", fallback=True), ["en"])
+
+    def test_a_language_without_its_own_pack_gets_the_english_one(self):
+        self.assertEqual(self.stage("fr", fallback=True), ["en"])
+
+    def test_an_older_tree_keeps_both_packs(self):
+        self.assertEqual(self.stage("de", fallback=False), ["de", "en"])
+
+    def test_only_a_real_definition_counts(self):
+        with tempfile.TemporaryDirectory() as core:
+            write(core, "lib/system_locale.lua", "-- function M.packageLanguage() is planned\n")
+            self.assertEqual(updater.sound_packs_to_stage(core, core, "de"), ["en", "de"])
+            write(core, "lib/system_locale.lua", "M.packageLanguage = function()\n  return nil\nend\n")
+            os.makedirs(os.path.join(core, "de"))
+            self.assertEqual(updater.sound_packs_to_stage(core, core, "de"), ["de"])
+
+
 if __name__ == "__main__":
     unittest.main()

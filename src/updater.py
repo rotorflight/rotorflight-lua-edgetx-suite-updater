@@ -631,7 +631,7 @@ class RFSuiteUpdaterApp:
             # 3. Local dist ZIPs
             local_builds = self._scan_local_dist_builds()
 
-            # Combine: Branches first, then Releases, then Local builds
+            # Combine: Branches, Releases, Local builds (the list shows the branches last)
             self.releases_data = branches + releases + local_builds
 
             if not self.releases_data:
@@ -659,7 +659,12 @@ class RFSuiteUpdaterApp:
             else:
                 filtered.append(r)
 
-        options = [r.get("tag_name", "") for r in filtered if r.get("tag_name")]
+        # The first entry is what an install takes when nobody opens the list, so a published package
+        # goes before any branch. A branch is built from its source; it comes first only when no
+        # release or local package is listed at all.
+        filtered = [r for r in filtered if not r.get("is_branch")] + [r for r in filtered if r.get("is_branch")]
+
+        options =[r.get("tag_name", "") for r in filtered if r.get("tag_name")]
         self.release_combo["values"] = options
         if options:
             self.release_combo.current(0)

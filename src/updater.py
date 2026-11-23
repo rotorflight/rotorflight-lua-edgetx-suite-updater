@@ -105,9 +105,10 @@ def sound_packs_to_stage(src_core: str, src_audio: str, lang: str) -> list:
             content = f.read()
     except OSError:
         content = ""
-    # A definition at the start of a line, outside a Lua long comment of any level (`--[=[ ... ]=]`),
-    # so a commented-out one does not count; a `-- function ...` line does not start with it either.
-    content = re.sub(r"--\[(=*)\[.*?\]\1\]", "", content, flags=re.DOTALL)
+    # A definition at the start of a line, outside a Lua long bracket of any level -- a long comment
+    # (`--[=[ ... ]=]`) or a long string (`[=[ ... ]=]`) -- so one that is only commented out or quoted
+    # does not count; a `-- function ...` line does not start with it either.
+    content = re.sub(r"(?:--)?\[(=*)\[.*?\]\1\]", "", content, flags=re.DOTALL)
     defined = re.search(r"^[ \t]*(?:function\s+M\.packageLanguage\s*\(|M\.packageLanguage\s*=\s*function\b)",
                         content, re.MULTILINE)
     if not defined:

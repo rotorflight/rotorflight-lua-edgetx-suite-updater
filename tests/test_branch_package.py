@@ -145,6 +145,17 @@ class SoundPackTests(unittest.TestCase):
             os.makedirs(os.path.join(core, "de"))
             self.assertEqual(updater.sound_packs_to_stage(core, core, "de"), ["de"])
 
+    def test_a_definition_inside_a_long_comment_does_not_count(self):
+        with tempfile.TemporaryDirectory() as core:
+            os.makedirs(os.path.join(core, "de"))
+            opening, closing = "--[" + "[", "]" + "]"  # the level-0 form, the most common one
+            for text in (opening + "\nfunction M.packageLanguage()\nend\n" + closing + "\n",
+                         "--[==[\nM.packageLanguage = function() end\n]==]\n"):
+                write(core, "lib/system_locale.lua", text)
+                self.assertEqual(updater.sound_packs_to_stage(core, core, "de"), ["en", "de"], text)
+            write(core, "lib/system_locale.lua", "--[=[ a note ]=]\nfunction M.packageLanguage()\nend\n")
+            self.assertEqual(updater.sound_packs_to_stage(core, core, "de"), ["de"])
+
 
 if __name__ == "__main__":
     unittest.main()

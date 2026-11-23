@@ -7,6 +7,7 @@ A desktop utility to download, install, and update the Rotorflight Lua suite for
 import os
 import sys
 import json
+import hashlib
 import shutil
 import zipfile
 import threading
@@ -76,6 +77,45 @@ def code_folders_by_use(card_root: str) -> tuple:
     if "/".join(CODE_FOLDERS[1]) in entry and "/".join(CODE_FOLDERS[0]) not in entry:
         return (CODE_FOLDERS[1], CODE_FOLDERS[0])
     return CODE_FOLDERS
+
+
+def read_suite_version(src_core: str) -> str:
+    """The version a source tree's lib/version.lua names, as the suite's packager reads it."""
+    try:
+        with open(os.path.join(src_core, "lib", "version.lua"), "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except OSError:
+        return "0.1.0"
+    parts = [re.search(rf"M\.{name}\s*=\s*(\d+)", content) for name in ("MAJOR", "MINOR", "PATCH")]
+    if all(parts):
+        return ".".join(m.group(1) for m in parts)
+    return "0.1.0"
+
+
+def write_build_identity(stage_dir: str, staging_core: str, version: str) -> str:
+    """Writes <code folder>/build.txt the way the suite's packager does (bin/package/build_package.py).
+
+    The suite's lib/precompile.lua compares this identity with the one it last compiled and rebuilds
+    all bytecode when it changes. Without the file it compares the version number, which two builds
+    of different branches share. The identity is a digest over the staged lua sources, so it changes
+    whenever they do; the digest leads because the radio compares only a bounded prefix.
+    """
+    digest = hashlib.sha256()
+    for root, dirs, files in os.walk(stage_dir):
+        dirs.sort()
+        for name in sorted(files):
+            if not name.endswith(".lua"):
+                continue
+            full_p = os.path.join(root, name)
+            digest.update(os.path.relpath(full_p, stage_dir).replace(os.sep, "/").encode("utf-8"))
+            digest.update(b"\0")
+            with open(full_p, "rb") as fh:
+                digest.update(fh.read())
+            digest.update(b"\0")
+    identity = f"{digest.hexdigest()[:16]}-{version}"
+    with open(os.path.join(staging_core, "build.txt"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(identity + "\n")
+    return identity
 
 
 def remove_previous_code(target_root: str, log=lambda _message: None) -> None:
@@ -898,14 +938,18 @@ class RFSuiteUpdaterApp:
         """Stages raw source code from a branch archive into EdgeTX structure with translation inlining."""
         src_root = os.path.join(repo_root, "src")
         src_core = os.path.join(src_root, "rfsuite")
-        src_widgets = os.path.join(src_root, "widgets", "rfsuite")
+        src_widgets = os.path.join(src_root, "widgets")
+        src_functions = os.path.join(src_root, "functions")
+        src_templates = os.path.join(src_root, "templates")
         src_user = os.path.join(src_root, "rfsuite.user")
         src_audio = os.path.join(src_core, "audio")
 
         code_folder, data_folder = source_tree_layout(src_core)
         staging_tools = os.path.join(stage_out, "SCRIPTS", "TOOLS")
         staging_core = os.path.join(stage_out, *code_folder)
-        staging_widgets = os.path.join(stage_out, "WIDGETS", "rfsuite")
+        staging_widgets = os.path.join(stage_out, "WIDGETS")
+        staging_functions = os.path.join(stage_out, "SCRIPTS", "FUNCTIONS")
+        staging_templates = os.path.join(stage_out, "TEMPLATES")
         staging_sounds = os.path.join(stage_out, "SOUNDS", "rf")
         staging_user = os.path.join(stage_out, *data_folder)
 
@@ -935,9 +979,30 @@ class RFSuiteUpdaterApp:
         # Copy tool entrypoint
         shutil.copy2(os.path.join(src_root, "main.lua"), os.path.join(staging_tools, "rfsuite.lua"))
 
-        # Copy widgets
+        # Copy widgets. EdgeTX discovers one widget per directory under /WIDGETS, so every directory
+        # under src/widgets is staged under its own name (the dashboard and its service widget).
         if os.path.isdir(src_widgets):
-            shutil.copytree(src_widgets, staging_widgets, dirs_exist_ok=True)
+            for widget_dir in sorted(os.listdir(src_widgets)):
+                s = os.path.join(src_widgets, widget_dir)
+                if os.path.isdir(s):
+                    self.log(f"Staging widget {widget_dir}...")
+                    shutil.copytree(s, os.path.join(staging_widgets, widget_dir), dirs_exist_ok=True)
+
+        # Copy special-function scripts. EdgeTX offers every lua file directly under
+        # /SCRIPTS/FUNCTIONS to a "Play Script" special function, so the folder is flat.
+        if os.path.isdir(src_functions):
+            os.makedirs(staging_functions, exist_ok=True)
+            for name in sorted(os.listdir(src_functions)):
+                s = os.path.join(src_functions, name)
+                if os.path.isfile(s) and name.endswith(".lua"):
+                    self.log(f"Staging function script {name}...")
+                    shutil.copy2(s, os.path.join(staging_functions, name))
+
+        # Copy model templates. EdgeTX lists each directory under /TEMPLATES as a category in its
+        # "New model" dialog.
+        if os.path.isdir(src_templates):
+            self.log("Staging model templates...")
+            shutil.copytree(src_templates, staging_templates, dirs_exist_ok=True)
 
         # Copy user default config
         if os.path.isdir(src_user):
@@ -950,7 +1015,7 @@ class RFSuiteUpdaterApp:
                 if not os.path.isdir(p_src):
                     p_src = os.path.join(src_audio, pack_lang)
                 if os.path.isdir(p_src):
-                    for sub in ["adj", "app", "evt", "stat", "gov"]:
+                    for sub in ["adj", "app", "evt", "stat", "gov", "inflight"]:
                         s_sub = os.path.join(p_src, sub)
                         if os.path.isdir(s_sub):
                             shutil.copytree(s_sub, os.path.join(staging_sounds, pack_lang, sub), dirs_exist_ok=True)
@@ -976,6 +1041,14 @@ class RFSuiteUpdaterApp:
             self.log(f"Resolving translations with {lang}.lua...")
             self._resolve_i18n_dir(staging_scripts, lang_file, fallback_file if lang != "en" else None, lang)
             self._resolve_i18n_dir(staging_widgets, lang_file, fallback_file if lang != "en" else None, lang)
+            # The templates carry ready tags only, in their lua and in the txt files EdgeTX shows
+            # in the template picker, so they are resolved but not precompiled.
+            if os.path.isdir(staging_templates):
+                self._resolve_i18n_dir(staging_templates, lang_file, fallback_file if lang != "en" else None, lang,
+                                       extensions=(".lua", ".txt"))
+
+        identity = write_build_identity(stage_out, staging_core, read_suite_version(src_core))
+        self.log(f"Build identity {identity}")
 
     def _precompile_i18n_dir(self, root_dir: str):
         """In-process i18n precompilation converting UI text macros to @i18n(...)@ tags."""
@@ -1111,8 +1184,9 @@ class RFSuiteUpdaterApp:
                     except Exception:
                         pass
 
-    def _resolve_i18n_dir(self, root_dir: str, lang_lua_path: str, fallback_lua_path: Optional[str], lang_code: str):
-        """In-process resolution of @i18n(...)@ tags using the Lua language table."""
+    def _resolve_i18n_dir(self, root_dir: str, lang_lua_path: str, fallback_lua_path: Optional[str], lang_code: str,
+                          extensions: Tuple[str, ...] = (".lua",)):
+        """In-process resolution of @i18n(...)@ tags using the Lua language table, in files ending in `extensions`."""
         translations = self._load_lua_i18n_table(lang_lua_path)
         fallback = self._load_lua_i18n_table(fallback_lua_path) if fallback_lua_path and os.path.isfile(fallback_lua_path) else None
 
@@ -1394,7 +1468,7 @@ class RFSuiteUpdaterApp:
 
         for root, _, files in os.walk(root_dir):
             for file in files:
-                if not file.endswith(".lua"):
+                if not file.endswith(extensions):
                     continue
                 fpath = os.path.join(root, file)
                 try:

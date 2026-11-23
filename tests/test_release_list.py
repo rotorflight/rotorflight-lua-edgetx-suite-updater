@@ -42,8 +42,8 @@ def branch(name):
     return {"tag_name": f"Branch: {name}", "prerelease": True, "is_branch": True, "branch_name": name}
 
 
-def release(tag, prerelease):
-    return {"tag_name": f"Release: {tag}", "prerelease": prerelease, "is_branch": False}
+def release(tag, prerelease, published_at=None):
+    return {"tag_name": f"Release: {tag}", "prerelease": prerelease, "is_branch": False, "published_at": published_at}
 
 
 class Host:
@@ -72,8 +72,8 @@ FETCHED = [
     branch("docs/agent-skills"),
     branch("feat/dashboard-kse-kevd"),
     branch("master"),
-    release("snapshot/0.3.0", True),
-    release("snapshot/0.2.1", True),
+    release("snapshot/0.3.0", True, "2026-11-20T08:51:37Z"),
+    release("snapshot/0.2.1", True, "2026-10-27T18:08:35Z"),
 ]
 
 
@@ -91,6 +91,14 @@ class ReleaseListTests(unittest.TestCase):
             "Branch: docs/agent-skills",
             "Branch: feat/dashboard-kse-kevd",
             "Branch: master",
+        ])
+
+    def test_the_newest_release_wins_whatever_order_the_api_returns(self):
+        host = fill([FETCHED[4], FETCHED[0], FETCHED[3]])
+        self.assertEqual(host.release_combo["values"], [
+            "Release: snapshot/0.3.0",
+            "Release: snapshot/0.2.1",
+            "Branch: docs/agent-skills",
         ])
 
     def test_a_full_release_comes_first_without_pre_releases(self):

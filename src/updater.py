@@ -661,8 +661,13 @@ class RFSuiteUpdaterApp:
 
         # The first entry is what an install takes when nobody opens the list, so a published package
         # goes before any branch. A branch is built from its source; it comes first only when no
-        # release or local package is listed at all.
-        filtered = [r for r in filtered if not r.get("is_branch")] + [r for r in filtered if r.get("is_branch")]
+        # release or local package is listed at all. The releases API documents no order, so the
+        # releases are sorted newest first by their publication time here.
+        releases = [r for r in filtered if not r.get("is_branch") and not r.get("is_local_dist")]
+        releases.sort(key=lambda r: r.get("published_at") or r.get("created_at") or "", reverse=True)
+        local_builds = [r for r in filtered if r.get("is_local_dist")]
+        branches = [r for r in filtered if r.get("is_branch")]
+        filtered = releases + local_builds + branches
 
         options =[r.get("tag_name", "") for r in filtered if r.get("tag_name")]
         self.release_combo["values"] = options

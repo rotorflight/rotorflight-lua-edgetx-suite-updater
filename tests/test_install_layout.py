@@ -63,7 +63,7 @@ class PackageSourceTreeTests(unittest.TestCase):
             def _precompile_i18n_dir(self, root):
                 roots.append(root)
 
-            def _resolve_i18n_dir(self, root, *_args):
+            def _resolve_i18n_dir(self, root, *_args, **_kwargs):
                 resolved.append(root)
 
         repo = tempfile.mkdtemp()
